@@ -1,118 +1,127 @@
 import { useState, useRef, useEffect } from 'react';
 
-import '@kitware/vtk.js/Rendering/Profiles/Geometry';
+import 'vtk.js/Sources/favicon';
 
-import vtkFullScreenRenderWindow from '@kitware/vtk.js/Rendering/Misc/FullScreenRenderWindow';
+// Load the rendering pieces we want to use (for both WebGL and WebGPU)
+import 'vtk.js/Sources/Rendering/Profiles/Volume';
 
-import vtkActor           from '@kitware/vtk.js/Rendering/Core/Actor';
-import vtkMapper          from '@kitware/vtk.js/Rendering/Core/Mapper';
-import vtkConeSource      from '@kitware/vtk.js/Filters/Sources/ConeSource';
+// Force DataAccessHelper to have access to various data source
+import 'vtk.js/Sources/IO/Core/DataAccessHelper/HtmlDataAccessHelper';
+import 'vtk.js/Sources/IO/Core/DataAccessHelper/HttpDataAccessHelper';
+import 'vtk.js/Sources/IO/Core/DataAccessHelper/JSZipDataAccessHelper';
 
-function App() {
-  const vtkContainerRef = useRef(null);
-  const context = useRef(null);
-  const [coneResolution, setConeResolution] = useState(6);
-  const [representation, setRepresentation] = useState(2);
+import vtkFullScreenRenderWindow from 'vtk.js/Sources/Rendering/Misc/FullScreenRenderWindow';
+import vtkHttpDataSetReader from 'vtk.js/Sources/IO/Core/HttpDataSetReader';
+import vtkImageMapper from 'vtk.js/Sources/Rendering/Core/ImageMapper';
+import vtkImageSlice from 'vtk.js/Sources/Rendering/Core/ImageSlice';
 
-  useEffect(() => {
-    if (!context.current) {
-      const fullScreenRenderer = vtkFullScreenRenderWindow.newInstance({
-        rootContainer: vtkContainerRef.current,
-      });
-      const coneSource = vtkConeSource.newInstance({ height: 1.0 });
+import controlPanel from './controlPanel.html';
 
-      const mapper = vtkMapper.newInstance();
-      mapper.setInputConnection(coneSource.getOutputPort());
+const fullScreenRenderWindow = vtkFullScreenRenderWindow.newInstance({
+  background: [0, 0, 0],
+});
+const renderWindow = fullScreenRenderWindow.getRenderWindow();
+const renderer = fullScreenRenderWindow.getRenderer();
+fullScreenRenderWindow.addController(controlPanel);
 
-      const actor = vtkActor.newInstance();
-      actor.setMapper(mapper);
+const imageActorI = vtkImageSlice.newInstance();
+const imageActorJ = vtkImageSlice.newInstance();
+const imageActorK = vtkImageSlice.newInstance();
 
-      const renderer = fullScreenRenderer.getRenderer();
-      const renderWindow = fullScreenRenderer.getRenderWindow();
+renderer.addActor(imageActorK);
+renderer.addActor(imageActorJ);
+renderer.addActor(imageActorI);
 
-      renderer.addActor(actor);
-      renderer.resetCamera();
-      renderWindow.render();
-
-      context.current = {
-        fullScreenRenderer,
-        renderWindow,
-        renderer,
-        coneSource,
-        actor,
-        mapper,
-      };
-    }
-
-    return () => {
-      if (context.current) {
-        const { fullScreenRenderer, coneSource, actor, mapper } = context.current;
-        actor.delete();
-        mapper.delete();
-        coneSource.delete();
-        fullScreenRenderer.delete();
-        context.current = null;
-      }
-    };
-  }, [vtkContainerRef]);
-
-  useEffect(() => {
-    if (context.current) {
-      const { coneSource, renderWindow } = context.current;
-      coneSource.setResolution(coneResolution);
-      renderWindow.render();
-    }
-  }, [coneResolution]);
-
-  useEffect(() => {
-    if (context.current) {
-      const { actor, renderWindow } = context.current;
-      actor.getProperty().setRepresentation(representation);
-      renderWindow.render();
-    }
-  }, [representation]);
-
-  return (
-    <div>
-      <div ref={vtkContainerRef} />
-      <table
-        style={{
-          position: 'absolute',
-          top: '25px',
-          left: '25px',
-          background: 'white',
-          padding: '12px',
-        }}
-      >
-        <tbody>
-          <tr>
-            <td>
-              <select
-                value={representation}
-                style={{ width: '100%' }}
-                onInput={(ev) => setRepresentation(Number(ev.target.value))}
-              >
-                <option value="0">Points</option>
-                <option value="1">Wireframe</option>
-                <option value="2">Surface</option>
-              </select>
-            </td>
-          </tr>
-          <tr>
-            <td>
-              <input
-                type="range"
-                min="4"
-                max="80"
-                value={coneResolution}
-                onChange={(ev) => setConeResolution(Number(ev.target.value))}
-              />
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+function updateColorLevel(e) {
+  const colorLevel = Number(
+    (e ? e.target : document.querySelector('.colorLevel')).value
   );
+  imageActorI.getProperty().setColorLevel(colorLevel);
+  imageActorJ.getProperty().setColorLevel(colorLevel);
+  imageActorK.getProperty().setColorLevel(colorLevel);
+  renderWindow.render();
 }
 
-export default App;
+function updateColorWindow(e) {
+  const colorLevel = Number(
+    (e ? e.target : document.querySelector('.colorWindow')).value
+  );
+  imageActorI.getProperty().setColorWindow(colorLevel);
+  imageActorJ.getProperty().setColorWindow(colorLevel);
+  imageActorK.getProperty().setColorWindow(colorLevel);
+  renderWindow.render();
+}
+
+const reader = vtkHttpDataSetReader.newInstance({
+  fetchGzip: true,
+});
+reader
+  .setUrl(`${__BASE_PATH__}/data/volume/headsq.vti`, { loadData: true })
+  .then(() => {
+    const data = reader.getOutputData();
+    const dataRange = data.getPointData().getScalars().getRange();
+    const extent = data.getExtent();
+
+    const imageMapperK = vtkImageMapper.newInstance();
+    imageMapperK.setInputData(data);
+    imageMapperK.setKSlice(30);
+    imageActorK.setMapper(imageMapperK);
+
+    const imageMapperJ = vtkImageMapper.newInstance();
+    imageMapperJ.setInputData(data);
+    imageMapperJ.setJSlice(30);
+    imageActorJ.setMapper(imageMapperJ);
+
+    const imageMapperI = vtkImageMapper.newInstance();
+    imageMapperI.setInputData(data);
+    imageMapperI.setISlice(30);
+    imageActorI.setMapper(imageMapperI);
+
+    renderer.resetCamera();
+    renderer.resetCameraClippingRange();
+    renderWindow.render();
+
+    ['.sliceI', '.sliceJ', '.sliceK'].forEach((selector, idx) => {
+      const el = document.querySelector(selector);
+      el.setAttribute('min', extent[idx * 2 + 0]);
+      el.setAttribute('max', extent[idx * 2 + 1]);
+      el.setAttribute('value', 30);
+    });
+
+    ['.colorLevel', '.colorWindow'].forEach((selector) => {
+      document.querySelector(selector).setAttribute('max', dataRange[1]);
+      document.querySelector(selector).setAttribute('value', dataRange[1]);
+    });
+    document
+      .querySelector('.colorLevel')
+      .setAttribute('value', (dataRange[0] + dataRange[1]) / 2);
+    updateColorLevel();
+    updateColorWindow();
+  });
+
+document.querySelector('.sliceI').addEventListener('input', (e) => {
+  imageActorI.getMapper().setISlice(Number(e.target.value));
+  renderWindow.render();
+});
+
+document.querySelector('.sliceJ').addEventListener('input', (e) => {
+  imageActorJ.getMapper().setJSlice(Number(e.target.value));
+  renderWindow.render();
+});
+
+document.querySelector('.sliceK').addEventListener('input', (e) => {
+  imageActorK.getMapper().setKSlice(Number(e.target.value));
+  renderWindow.render();
+});
+
+document
+  .querySelector('.colorLevel')
+  .addEventListener('input', updateColorLevel);
+document
+  .querySelector('.colorWindow')
+  .addEventListener('input', updateColorWindow);
+
+global.fullScreen = fullScreenRenderWindow;
+global.imageActorI = imageActorI;
+global.imageActorJ = imageActorJ;
+global.imageActorK = imageActorK;
